@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the app directory into the container at /app
 COPY ./app /app/app
 
+# Copy the static directory into the container at /app
+COPY ./static /app/static
+
 # Make port 80 available to the world outside this container (Render will set this via $PORT)
 EXPOSE 80
 

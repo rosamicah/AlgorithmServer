@@ -14,8 +14,9 @@ This application is designed to be deployed on Render.com as a web service using
 2.  **Deployment Configuration:**
     *   **Runtime:** Select "Docker". Render should automatically detect the `Dockerfile` in your repository.
     *   **Build Command:** This is handled by the `Dockerfile` (typically `pip install -r requirements.txt`).
-    *   **Start Command:** Render will use the `CMD` instruction from the `Dockerfile`. Ensure your `Dockerfile` has:
-        `CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$PORT"]`
+    *   **Start Command:** When using Docker, Render typically uses the `CMD` instruction from your `Dockerfile`. However, if the "Start Command" field in the Render dashboard *cannot* be left blank, you should enter the command directly (without the `CMD` keyword from the Dockerfile syntax). For this project, use:
+        `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+        The `Dockerfile` also specifies this as its default `CMD`, but providing it in the Render UI will ensure it's used if Render's policies require the field to be filled.
     *   **Instance Type:** Choose an appropriate instance type based on your expected load.
     *   **Health Check Path:** You can set this to `/` or a specific health check endpoint if you create one later. For now, `/` should suffice once the service is up.
 
@@ -23,7 +24,17 @@ This application is designed to be deployed on Render.com as a web service using
     *   Click "Create Web Service". Render will build the Docker image and deploy your application.
     *   Once deployed, Render will provide you with a URL for your service (e.g., `https://your-app-name.onrender.com`).
 
-## How to use the API
+## Web Interface
+
+The application provides a simple web interface for uploading files directly through your browser.
+
+1.  Navigate to the root URL of your deployed service (e.g., `https://your-app-name.onrender.com/`).
+2.  You will see a page titled "Upload Property Data File".
+3.  Click the "Choose file" button and select an Excel (.xls, .xlsx) or CSV (.csv) file from your computer.
+4.  Click the "Upload and Process" button.
+5.  The browser will automatically download the processed file, typically named `processed_<your_original_filename>`.
+
+## API Endpoint (for programmatic access)
 
 Once deployed, the API will have one endpoint:
 
