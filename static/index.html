@@ -5,32 +5,174 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Property Data Processor</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; }
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
+        .container { background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
+        h1 { color: #333; text-align: center; margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; font-weight: bold; }
-        input[type="file"] { display: block; margin-bottom: 20px; }
-        input[type="submit"] { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        input[type="submit"]:hover { background-color: #0056b3; }
+        input[type="file"] { display: block; width: calc(100% - 22px); padding: 10px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; }
+        button, input[type="submit"] { background-color: #007bff; color: white; padding: 12px 18px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
+        button:hover, input[type="submit"]:hover { background-color: #0056b3; }
+        button:disabled, input[type="submit"]:disabled { background-color: #cccccc; cursor: not-allowed; }
         .footer { margin-top: 30px; font-size: 0.9em; text-align: center; color: #666; }
+        #statusArea { margin-top: 20px; padding: 10px; border: 1px solid #eee; border-radius: 4px; background-color: #f9f9f9; min-height: 50px; }
+        #statusArea p { margin: 5px 0; }
+        #progressBarContainer { width: 100%; background-color: #e0e0e0; border-radius: 4px; margin-bottom: 10px; display: none; }
+        #progressBar { width: 0%; height: 20px; background-color: #007bff; border-radius: 4px; text-align: center; line-height: 20px; color: white; }
+        #downloadButton { margin-top: 20px; background-color: #28a745; display: none; }
+        #downloadButton:hover { background-color: #1e7e34; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Upload Property Data File</h1>
-        <p>Select an Excel (.xls, .xlsx) or CSV (.csv) file to process.</p>
-        <form action="/process/" method="post" enctype="multipart/form-data">
+        <p style="text-align:center; margin-bottom: 20px;">Select an Excel (.xls, .xlsx) or CSV (.csv) file to process.</p>
+
+        <form id="uploadForm">
             <div>
                 <label for="file">Choose file:</label>
-                <input type="file" id="file" name="file" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel">
+                <input type="file" id="file" name="file" accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" required>
+            </div>
+            <div id="progressBarContainer">
+                <div id="progressBar">0%</div>
             </div>
             <div>
-                <input type="submit" value="Upload and Process">
+                <button type="submit" id="submitButton">Upload and Process</button>
             </div>
         </form>
+
+        <div id="statusArea">
+            <p>Ready to upload.</p>
+        </div>
+
+        <button id="downloadButton">Download Processed File</button>
     </div>
-    <div class="footer">
-        <p>Algorithm Server</p>
-    </div>
+
+    <script>
+        const uploadForm = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('file');
+        const submitButton = document.getElementById('submitButton');
+        const statusArea = document.getElementById('statusArea');
+        const progressBarContainer = document.getElementById('progressBarContainer');
+        const progressBar = document.getElementById('progressBar');
+        const downloadButton = document.getElementById('downloadButton');
+        let downloadFileId = null;
+
+        uploadForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            if (!fileInput.files.length) {
+                addStatusMessage("Please select a file to upload.", true);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            submitButton.disabled = true;
+            downloadButton.style.display = 'none';
+            progressBarContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            clearStatus();
+            addStatusMessage("Uploading file...");
+
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/process/', true);
+
+                xhr.upload.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percentComplete = Math.round((e.loaded / e.total) * 100);
+                        progressBar.style.width = percentComplete + '%';
+                        progressBar.textContent = percentComplete + '%';
+                    }
+                };
+
+                xhr.onload = async function() {
+                    submitButton.disabled = false;
+                    progressBarContainer.style.display = 'none';
+
+                    if (xhr.status === 200) {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            addStatusMessage("File processing complete!");
+                            if (response.status_messages && response.status_messages.length > 0) {
+                                response.status_messages.forEach(msg => addStatusMessage(msg));
+                            }
+                            if (response.file_id) {
+                                downloadFileId = response.file_id;
+                                downloadButton.style.display = 'block';
+                                addStatusMessage("Click the button below to download your file.", false, true);
+                            } else if (response.error) {
+                                addStatusMessage(`Error: ${response.error}`, true);
+                            } else {
+                                 addStatusMessage("Processed, but no file ID received. Cannot prepare download.", true);
+                            }
+                        } catch (e) {
+                            addStatusMessage("Error parsing server response.", true);
+                            console.error("Parsing error:", e, "Response text:", xhr.responseText);
+                        }
+                    } else {
+                        let errorMsg = `Upload failed. Server responded with status: ${xhr.status}`;
+                        try {
+                            const errResponse = JSON.parse(xhr.responseText);
+                            if (errResponse.error) {
+                                errorMsg = `Error: ${errResponse.error}`;
+                            } else if (errResponse.detail) {
+                                 errorMsg = `Error: ${errResponse.detail}`;
+                            }
+                        } catch(e) {
+                            // Use default errorMsg
+                        }
+                        addStatusMessage(errorMsg, true);
+                         console.error("Upload failed:", xhr.responseText);
+                    }
+                };
+
+                xhr.onerror = function() {
+                    submitButton.disabled = false;
+                    progressBarContainer.style.display = 'none';
+                    addStatusMessage("An error occurred during the upload. Please check your network connection.", true);
+                };
+
+                // Add message that processing has started after upload completes
+                xhr.upload.onloadend = function() {
+                    if (xhr.upload.onprogress) { // Ensure progress was for upload
+                        progressBar.style.width = '100%';
+                        progressBar.textContent = '100%';
+                    }
+                    addStatusMessage("Upload complete. Server is now processing the file...");
+                };
+
+                xhr.send(formData);
+
+            } catch (error) {
+                submitButton.disabled = false;
+                progressBarContainer.style.display = 'none';
+                addStatusMessage("An unexpected error occurred: " + error.message, true);
+                console.error("Form submission error:", error);
+            }
+        });
+
+        downloadButton.addEventListener('click', function() {
+            if (downloadFileId) {
+                window.location.href = `/download/${downloadFileId}`;
+            } else {
+                addStatusMessage("No file ID available for download.", true);
+            }
+        });
+
+        function addStatusMessage(message, isError = false, isSuccess = false) {
+            const p = document.createElement('p');
+            p.textContent = message;
+            if (isError) p.style.color = 'red';
+            if (isSuccess) p.style.color = 'green';
+            statusArea.appendChild(p);
+        }
+
+        function clearStatus() {
+            statusArea.innerHTML = '';
+        }
+
+    </script>
 </body>
 </html>

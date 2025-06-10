@@ -1,14 +1,19 @@
 import pandas as pd
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from io import BytesIO
 import uvicorn
 import os
+import uuid
+from pathlib import Path
 
 from .processor import enforce_master_columns, calculate_columns
 
 app = FastAPI()
+
+# In-memory cache for processed files
+processed_files_cache = {}
 
 # Mount static files directory
 # Ensure the 'static' directory exists at the root of where main.py is run from,
@@ -60,8 +65,13 @@ async def read_root():
 @app.post("/process/")
 async def process_file(file: UploadFile = File(...)):
     """
-    Accepts a CSV or Excel file, processes it, and returns an Excel file.
+    Accepts a CSV or Excel file, processes it using a generator,
+    stores the result in a cache, and returns a JSON response with a file ID and status messages.
     """
+    original_filename = file.filename
+    status_messages = []
+    df_processed = None
+
     try:
         # Read the uploaded file into a pandas DataFrame
         if file.filename.endswith(".csv"):
@@ -69,27 +79,83 @@ async def process_file(file: UploadFile = File(...)):
         elif file.filename.endswith((".xls", ".xlsx")):
             df = pd.read_excel(file.file)
         else:
-            return {"error": "Invalid file type. Please upload a CSV or Excel file."}
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid file type. Please upload a CSV or Excel file."}
+            )
 
-        # Process the DataFrame
-        df_enforced = enforce_master_columns(df.copy()) # Use a copy to avoid modifying the original df if it's used elsewhere
-        df_processed = calculate_columns(df_enforced)
+        # Process the DataFrame using the generator
+        df_enforced = enforce_master_columns(df.copy())
 
-        # Save the processed DataFrame to an in-memory Excel file
+        # Iterate through the generator
+        for item in calculate_columns(df_enforced):
+            if isinstance(item, str):
+                status_messages.append(item)
+            elif isinstance(item, pd.DataFrame):
+                df_processed = item
+                # Assuming the DataFrame is the last item yielded, as per processor.py refactor
+                break
+            else:
+                # Should not happen based on current processor.py
+                status_messages.append(f"Unexpected item type from processor: {type(item)}")
+
+        if df_processed is None:
+            # This case implies the generator didn't yield a DataFrame
+            status_messages.append("Error: No processed data frame returned from processor.")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Processing failed to produce a result.", "status_messages": status_messages}
+            )
+
+        # Save the processed DataFrame to an in-memory Excel file (BytesIO buffer)
         output_buffer = BytesIO()
         with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
             df_processed.to_excel(writer, index=False, sheet_name='Processed Data')
-        output_buffer.seek(0)
+        output_buffer.seek(0) # Reset buffer position to the beginning
 
-        # Return the Excel file as a StreamingResponse
-        return StreamingResponse(
-            output_buffer,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename=processed_{file.filename}"}
+        # Generate a unique file ID and store the buffer in the cache
+        file_id = str(uuid.uuid4())
+        # Store the buffer and original filename for Content-Disposition later
+        processed_files_cache[file_id] = {"buffer": output_buffer, "filename": original_filename}
+
+        status_messages.append("File processed successfully. Ready for download.")
+        return JSONResponse(
+            status_code=200,
+            content={"file_id": file_id, "status_messages": status_messages, "original_filename": original_filename}
         )
 
     except Exception as e:
-        return {"error": f"An error occurred: {str(e)}"}
+        # Log the exception details for debugging on the server
+        print(f"Error during file processing: {str(e)}") # Basic logging
+        # Consider more robust logging for production
+        status_messages.append(f"An error occurred: {str(e)}")
+        return JSONResponse(
+            status_code=500, # Internal Server Error
+            content={"error": f"An unexpected error occurred during processing: {str(e)}", "status_messages": status_messages}
+        )
+
+@app.get("/download/{file_id}")
+async def download_file(file_id: str):
+    """
+    Serves the processed file from the cache using its file_id.
+    The file is removed from the cache after retrieval.
+    """
+    cached_file_data = processed_files_cache.pop(file_id, None)
+
+    if cached_file_data is None:
+        raise HTTPException(status_code=404, detail="File not found, may have expired or already been downloaded.")
+
+    output_buffer = cached_file_data["buffer"]
+    original_filename = cached_file_data["filename"]
+
+    # Ensure buffer is at the beginning before reading
+    output_buffer.seek(0)
+
+    return StreamingResponse(
+        output_buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=processed_{original_filename}"}
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

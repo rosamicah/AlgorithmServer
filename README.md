@@ -26,13 +26,16 @@ This application is designed to be deployed on Render.com as a web service using
 
 ## Web Interface
 
-The application provides a simple web interface for uploading files directly through your browser.
+The application provides an interactive web interface for uploading files directly through your browser.
 
 1.  Navigate to the root URL of your deployed service (e.g., `https://your-app-name.onrender.com/`).
 2.  You will see a page titled "Upload Property Data File".
 3.  Click the "Choose file" button and select an Excel (.xls, .xlsx) or CSV (.csv) file from your computer.
 4.  Click the "Upload and Process" button.
-5.  The browser will automatically download the processed file, typically named `processed_<your_original_filename>`.
+    *   An upload progress bar will show the file being sent to the server.
+    *   Once uploaded, a status area will display messages like "Upload complete. Server is now processing the file..." followed by step-by-step processing updates (e.g., "Step 1/19: Auto Offer calculations complete.").
+5.  After processing is complete, a "Download File" button will appear.
+6.  Click the "Download File" button. The browser will then download the processed Excel file, typically named `processed_<your_original_filename>.xlsx`.
 
 ## API Endpoint (for programmatic access)
 
