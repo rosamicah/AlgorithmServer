@@ -67,6 +67,7 @@ def calculate_columns(df):
     max_arv = pd.concat([est_val, market_val, assessed_val, last_sale], axis=1).max(axis=1)
 
     # 2. Auto offer logic (Block 1)
+    yield "Step 1 of 4: Auto Offer calculations processing..."
     auto_offer = []
     for i in range(num_rows):
         mval = max_arv.iloc[i]
@@ -97,7 +98,6 @@ def calculate_columns(df):
             ao = ao - ao % 1000
         auto_offer.append(ao)
     df["Auto offer"] = auto_offer
-    yield "Step 1/19: Auto Offer calculations complete."
 
     # 3. % of ARV
     df["% of ARV"] = np.where(
@@ -105,11 +105,9 @@ def calculate_columns(df):
         df["Auto offer"] / max_arv,
         np.nan
     )
-    yield "Step 2/19: % of ARV calculation complete."
 
     # 4. Property #
     df["Property #"] = np.arange(1, len(df)+1)
-    yield "Step 3/19: Property # calculation complete."
 
     # 5. Owner-Time Factor
     if "Ownership Length (Months)" in df:
@@ -121,13 +119,12 @@ def calculate_columns(df):
         np.where(ao_col >= 240, 1,
         np.where((ao_col >= 60) & (ao_col < 240), 0.75, 0.5))
     )
-    yield "Step 4/19: Owner-Time Factor calculation complete."
 
     # 6. Absentee Owner Factor
     df["Absentee Owner Factor"] = np.where(owner_mailing == address, 0.25, 1)
-    yield "Step 5/19: Absentee Owner Factor calculation complete."
 
     # 7. Land Value Factor (Block 2)
+    yield "Step 2 of 4: Land Value Factor calculations processing..."
     lvf = []
     for i in range(num_rows):
         bh = est_val.iloc[i]
@@ -164,9 +161,9 @@ def calculate_columns(df):
             res2 = 1
         lvf.append(max(res1, res2))
     df["Land Value Factor"] = lvf
-    yield "Step 6/19: Land Value Factor calculation complete."
 
     # 8. Improvement Factor (Block 3)
+    yield "Step 3 of 4: Improvement Factor calculations processing..."
     improvement_factor = []
     for i in range(num_rows):
         try:
@@ -179,14 +176,12 @@ def calculate_columns(df):
             cond2 = False
         improvement_factor.append(0.25 if (cond1 or cond2) else 1)
     df["Improvement Factor"] = improvement_factor
-    yield "Step 7/19: Improvement Factor calculation complete."
 
     # 9. Mortgage Factor
     bj = eq_pct
     df["Mortgage Factor"] = np.where(bj == 100, 1,
                              np.where((bj < 100) & (bj >= 70), 0.875,
                              np.where((bj < 70) & (bj > 50), 0.75, 0.5)))
-    yield "Step 8/19: Mortgage Factor calculation complete."
 
     # 10. Last Sale Price Factor
     bg = last_sale_amt
@@ -194,9 +189,9 @@ def calculate_columns(df):
     ratio = bg / bh
     df["Last Sale Price Factor"] = np.where(ratio >= 0.5, 0.5,
                                    np.where((ratio <= 0.5) & (ratio >= 0.25), 0.75, 1))
-    yield "Step 9/19: Last Sale Price Factor calculation complete."
 
     # 11. ARV Factor (Block 4)
+    yield "Step 4 of 4: ARV Factor calculations processing..."
     arv_candidates = pd.concat([est_val, assessed_val, last_sale], axis=1)
     max_arv2 = arv_candidates.max(axis=1)
     median_bh = est_val.median()
@@ -215,7 +210,6 @@ def calculate_columns(df):
             res = 0
         arvf.append(res)
     df["ARV Factor"] = arvf
-    yield "Step 10/19: ARV Factor calculation complete."
 
     # 12. Foreclosure Factor (uses "Recording Date" for year, blank=0, <2023=0, >=2023=1)
     def get_recording_year(val):
@@ -229,11 +223,9 @@ def calculate_columns(df):
         except Exception:
             return 0
     df["Foreclosure Factor"] = df["Recording Date"].apply(get_recording_year)
-    yield "Step 11/19: Foreclosure Factor calculation complete."
 
     # 13. Vacant Factor
     df["Vacant Factor"] = df["Vacant?"].apply(lambda x: 1 if str(x).strip() == "1" else 0)
-    yield "Step 12/19: Vacant Factor calculation complete."
 
     # 14. Strain Factor (uses Last Sale Price Factor as CQ)
     def strain_factor_row(row):
@@ -248,14 +240,12 @@ def calculate_columns(df):
         else:
             return 0
     df["Strain Factor"] = df.apply(strain_factor_row, axis=1)
-    yield "Step 13/19: Strain Factor calculation complete."
 
     # 15. CQ Factor (uses "Air Conditioning Type")
     df["CQ Factor"] = df["Air Conditioning Type"].apply(
         lambda z: 0 if isinstance(z, str) and str(z).strip().upper() in ["CENTRAL", "EVAPORATIVE", "REFRIGERATOR", "YES"]
         else (np.nan if pd.isna(z) or str(z).strip() == "" else 1)
     )
-    yield "Step 14/19: CQ Factor calculation complete."
 
     # 16. Yr Built Factor
     i = year_built
@@ -279,7 +269,6 @@ def calculate_columns(df):
             res = 1
         yr_built_factor.append(res)
     df["Yr Built Factor"] = yr_built_factor
-    yield "Step 15/19: Yr Built Factor calculation complete."
 
     # 17. Auto Offer Factor
     b = df["Auto offer"].replace('[\$,]', '', regex=True).replace('', np.nan)
@@ -307,7 +296,6 @@ def calculate_columns(df):
             res = 0
         auto_offer_factor.append(res)
     df["Auto Offer Factor"] = auto_offer_factor
-    yield "Step 16/19: Auto Offer Factor calculation complete."
 
     # 18. Factor SUM - robust conversion to numeric before summing!
     factor_cols = [
@@ -318,23 +306,20 @@ def calculate_columns(df):
     for col in factor_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df["Factor SUM"] = df[factor_cols].sum(axis=1, min_count=1)
-    yield "Step 17/19: Factor SUM calculation complete."
 
     # 19. Propensity to Sell
     cy = df["Factor SUM"]
     df["Propensity to Sell"] = np.where(cy >= 10, "High",
                                 np.where((cy < 10) & (cy >= 9), "Mid-High",
                                 np.where((cy < 9) & (cy >= 7), "Med", "Low")))
-    yield "Step 18/19: Propensity to Sell calculation complete."
 
     # 20. Median List Price: median of Estimated Value
     median_list_price = est_val.median()
     df["Median List Price"] = median_list_price
-    yield "Step 19/19: Median List Price calculation complete."
 
     # ---- FORMATTING for visible output ----
-    yield "Formatting final columns..."
     df["% of ARV"] = df["% of ARV"].apply(lambda x: "" if pd.isna(x) else f"{int(round(x * 100))}%")
     df["Auto offer"] = df["Auto offer"].apply(lambda x: "" if pd.isna(x) else f"${int(x):,}")
+    yield "Saving File and Prepping for Download..."
 
     yield df

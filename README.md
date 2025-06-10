@@ -33,7 +33,12 @@ The application provides an interactive web interface for uploading files direct
 3.  Click the "Choose file" button and select an Excel (.xls, .xlsx) or CSV (.csv) file from your computer.
 4.  Click the "Upload and Process" button.
     *   An upload progress bar will show the file being sent to the server.
-    *   Once uploaded, a status area will display messages like "Upload complete. Server is now processing the file..." followed by step-by-step processing updates (e.g., "Step 1/19: Auto Offer calculations complete.").
+    *   Once uploaded, a status area will display messages like "Upload complete. Server is now processing the file...". This will be followed by progress updates for major calculation blocks, such as:
+        *   "Step 1 of 4: Auto Offer calculations processing..."
+        *   "Step 2 of 4: Land Value Factor calculations processing..."
+        *   "Step 3 of 4: Improvement Factor calculations processing..."
+        *   "Step 4 of 4: ARV Factor calculations processing..."
+        *   And finally, "Saving File and Prepping for Download...".
 5.  After processing is complete, a "Download File" button will appear.
 6.  Click the "Download File" button. The browser will then download the processed Excel file, typically named `processed_<your_original_filename>.xlsx`.
 
