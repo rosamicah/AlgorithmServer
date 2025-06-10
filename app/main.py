@@ -1,5 +1,5 @@
 import pandas as pd
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
@@ -12,8 +12,54 @@ import asyncio
 import tempfile
 import shutil
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import boto3
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
 from .processor import enforce_master_columns, calculate_columns
+
+# AWS Configuration
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1") # Default if not set
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "serverliststoragebackup")
+
+# Email Configuration
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+EMAIL_SENDER_NAME = os.getenv("EMAIL_SENDER_NAME", "PicLeads Results") # Default if not set
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
+
+# Initialize S3 client
+s3_client = None
+if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+    try:
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION
+        )
+        # Test connection/credentials by listing buckets (optional, can be noisy)
+        # s3_client.list_buckets()
+        print("S3 client initialized successfully.")
+    except (NoCredentialsError, PartialCredentialsError):
+        print("Error: AWS credentials not found or incomplete in environment variables.")
+        s3_client = None
+    except ClientError as e:
+        print(f"Error initializing S3 client: {e}. Check region and credentials.")
+        s3_client = None
+    except Exception as e:
+        print(f"An unexpected error occurred during S3 client initialization: {e}")
+        s3_client = None
+else:
+    print("AWS Access Key ID or Secret Access Key not provided. S3 functionality will be disabled.")
+
+# Placeholder for email library setup if needed globally, or handle per request.
+# For smtplib, setup is usually done when sending.
 
 app = FastAPI()
 
@@ -147,7 +193,7 @@ async def process_file(file: UploadFile = File(...)):
         )
 
 @app.post("/upload_for_sse/")
-async def upload_for_sse_processing(file: UploadFile = File(...)):
+async def upload_for_sse_processing(file: UploadFile = File(...), email: str = Form(...)):
     try:
         file_id = str(uuid.uuid4()) # This ID is for the temporary file
         # Save the uploaded file to a temporary location
@@ -170,7 +216,7 @@ async def upload_for_sse_processing(file: UploadFile = File(...)):
             "message": "File uploaded successfully. Starting processing stream.",
             "stream_id": file_id,
             "original_filename": file.filename,
-            "stream_url": f"/stream_processing/{file_id}/?filename={file.filename}"
+            "stream_url": f"/stream_processing/{file_id}/?filename={file.filename}&email={email}"
         })
     except Exception as e:
         # Log the exception e
@@ -178,7 +224,7 @@ async def upload_for_sse_processing(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
 @app.get("/stream_processing/{stream_id}/")
-async def stream_processing(stream_id: str, filename: str): # filename passed as query param
+async def stream_processing(stream_id: str, filename: str, email: str): # email added from query param
     temp_file_path = os.path.join(TEMP_FILE_DIR, f"{stream_id}_{filename}")
 
     async def event_generator():
@@ -252,17 +298,106 @@ async def stream_processing(stream_id: str, filename: str): # filename passed as
                 }
                 await asyncio.sleep(0.1)
 
+                # --- S3 Upload and Email Logic Start ---
+                s3_object_name = f"{os.path.splitext(filename)[0]}_processed_{stream_id[:8]}.xlsx" # Added part of stream_id for uniqueness
+                s3_public_url = None
+
+                if s3_client and S3_BUCKET_NAME:
+                    try:
+                        yield {
+                            "event": "message",
+                            "data": json.dumps({"message": f"Uploading processed file to S3 bucket: {S3_BUCKET_NAME}..."})
+                        }
+                        await asyncio.sleep(0.1)
+
+                        s3_client.put_object(
+                            Bucket=S3_BUCKET_NAME,
+                            Key=s3_object_name,
+                            Body=output_buffer,
+                            ACL='public-read',
+                            ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        )
+                        output_buffer.seek(0)
+
+                        s3_public_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_object_name}"
+
+                        yield {
+                            "event": "message",
+                            "data": json.dumps({"message": f"File successfully uploaded to S3. URL: {s3_public_url}"})
+                        }
+                        await asyncio.sleep(0.1)
+
+                    except (NoCredentialsError, PartialCredentialsError) as e:
+                        yield {"event": "error", "data": json.dumps({"message": f"S3 Upload Error: AWS credentials missing or incomplete. {str(e)}"})}
+                        await asyncio.sleep(0.1)
+                    except ClientError as e:
+                        error_code = e.response.get("Error", {}).get("Code")
+                        error_message = e.response.get("Error", {}).get("Message")
+                        yield {"event": "error", "data": json.dumps({"message": f"S3 Upload Error ({error_code}): {error_message}"})}
+                        await asyncio.sleep(0.1)
+                    except Exception as e:
+                        yield {"event": "error", "data": json.dumps({"message": f"S3 Upload Error: {str(e)}"})}
+                        await asyncio.sleep(0.1)
+                else:
+                    yield {"event": "message", "data": json.dumps({"message": "S3 client not configured; skipping S3 upload."})}
+                    await asyncio.sleep(0.1)
+
+                if s3_public_url and email and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD and EMAIL_HOST:
+                    try:
+                        yield {
+                            "event": "message",
+                            "data": json.dumps({"message": f"Sending email notification to {email}..."})
+                        }
+                        await asyncio.sleep(0.1)
+
+                        msg = MIMEMultipart()
+                        msg['From'] = f"{EMAIL_SENDER_NAME} <{EMAIL_HOST_USER}>"
+                        msg['To'] = email
+                        msg['Subject'] = f"{os.path.splitext(filename)[0]} is Processed and Ready for Download"
+
+                        email_body = f"Hello,\n\nYour file '{filename}' has been processed.\n\nYou can download it from the following link:\n{s3_public_url}\n\nThank you,\n{EMAIL_SENDER_NAME}"
+                        msg.attach(MIMEText(email_body, 'plain'))
+
+                        server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
+                        server.starttls()
+                        server.login(EMAIL_HOST_USER, EMAIL_HOST_PASSWORD)
+                        server.sendmail(EMAIL_HOST_USER, email, msg.as_string())
+                        server.quit()
+
+                        yield {
+                            "event": "message",
+                            "data": json.dumps({"message": "Email notification sent successfully."})
+                        }
+                        await asyncio.sleep(0.1)
+
+                    except smtplib.SMTPAuthenticationError:
+                        yield {"event": "error", "data": json.dumps({"message": "Email Sending Error: SMTP authentication failed. Check EMAIL_HOST_USER/PASSWORD."})}
+                        await asyncio.sleep(0.1)
+                    except Exception as e:
+                        yield {"event": "error", "data": json.dumps({"message": f"Email Sending Error: {str(e)}"})}
+                        await asyncio.sleep(0.1)
+                elif s3_public_url:
+                    yield {"event": "message", "data": json.dumps({"message": "Email client not configured; skipping email notification. File is on S3."})}
+                    await asyncio.sleep(0.1)
+                # --- S3 Upload and Email Logic End ---
+
                 final_file_id = str(uuid.uuid4())
                 processed_files_cache[final_file_id] = {
                     "data": output_buffer,
-                    "filename": f"processed_{filename}"
+                    "filename": f"processed_{filename}" # For direct download link
                 }
+
+                # Modify complete message based on S3 success
+                complete_message = "Processing complete. File is ready for direct download."
+                if s3_public_url:
+                    complete_message = f"Processing complete. File uploaded to S3 and link sent to {email} (if configured). Direct download also available."
 
                 yield {
                     "event": "complete",
                     "data": json.dumps({
-                        "file_id": final_file_id,
-                        "message": "Processing complete. File is ready for download."
+                        "file_id": final_file_id, # For direct download
+                        "s3_url": s3_public_url, # Include S3 URL in completion event
+                        "message": complete_message
                     })
                 }
             else:

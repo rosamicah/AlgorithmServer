@@ -6,3 +6,5 @@ openpyxl
 python-multipart
 aiofiles
 sse-starlette
+boto3
+emails
