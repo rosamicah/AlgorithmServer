@@ -71,7 +71,7 @@
             downloadButton.style.display = 'none';
             progressBarContainer.style.display = 'block';
             progressBar.style.width = '0%';
-            progressBar.textContent = '0%';
+            progressBar.textContent = '0%'; // For upload progress
             clearStatus();
             addStatusMessage("Uploading file...");
 
@@ -87,69 +87,111 @@
                     }
                 };
 
+                xhr.upload.onloadend = function() {
+                    // This signifies the end of the upload itself.
+                    // Keep progress bar at 100% for upload, or change text.
+                    progressBar.style.width = '100%';
+                    progressBar.textContent = 'Upload Complete. Waiting...';
+                    // Clear previous "Uploading file..." and add new status
+                    clearStatus();
+                    addStatusMessage("Upload complete. Waiting for server to start processing...");
+                };
+
                 xhr.onload = async function() {
-                    submitButton.disabled = false;
-                    progressBarContainer.style.display = 'none';
+                    // This is called when the server has responded after its processing.
+                    submitButton.disabled = false; // Re-enable button by default
 
                     if (xhr.status === 200) {
                         try {
                             const response = JSON.parse(xhr.responseText);
-                            addStatusMessage("File processing complete!");
-                            if (response.status_messages && response.status_messages.length > 0) {
-                                response.status_messages.forEach(msg => addStatusMessage(msg));
-                            }
-                            if (response.file_id) {
-                                downloadFileId = response.file_id;
-                                downloadButton.style.display = 'block';
-                                addStatusMessage("Click the button below to download your file.", false, true);
+
+                            if (response.status_messages && response.status_messages.length > 0 && response.file_id) {
+                                clearStatus(); // Clear "Waiting for server..."
+                                addStatusMessage("Server processing started...");
+
+                                progressBar.style.width = '0%'; // Reset for server processing simulation
+                                progressBar.textContent = 'Processing: 0%';
+                                progressBarContainer.style.display = 'block'; // Ensure it's visible
+
+                                const totalServerSteps = response.status_messages.length;
+                                let currentServerStep = 0;
+
+                                function displayNextServerStep() {
+                                    if (currentServerStep < totalServerSteps) {
+                                        const message = response.status_messages[currentServerStep];
+                                        addStatusMessage(message);
+
+                                        const progressPercentage = Math.round(((currentServerStep + 1) / totalServerSteps) * 100);
+                                        progressBar.style.width = progressPercentage + '%';
+                                        progressBar.textContent = `Processing: ${progressPercentage}%`;
+
+                                        currentServerStep++;
+                                        setTimeout(displayNextServerStep, 700); // 700ms delay
+                                    } else {
+                                        // All steps displayed
+                                        progressBar.textContent = 'Processing Complete!';
+                                        // Consider hiding progress bar after a short delay or changing its color
+                                        // setTimeout(() => { progressBarContainer.style.display = 'none'; }, 2000);
+
+                                        downloadFileId = response.file_id;
+                                        downloadButton.style.display = 'block';
+                                        addStatusMessage("Click the button below to download your file.", false, true);
+                                    }
+                                }
+                                displayNextServerStep(); // Start displaying simulated server steps
+
                             } else if (response.error) {
+                                clearStatus();
                                 addStatusMessage(`Error: ${response.error}`, true);
+                                progressBarContainer.style.display = 'none';
                             } else {
-                                 addStatusMessage("Processed, but no file ID received. Cannot prepare download.", true);
+                                clearStatus();
+                                addStatusMessage("Processing complete, but an issue occurred retrieving results.", true);
+                                progressBarContainer.style.display = 'none';
                             }
                         } catch (e) {
-                            addStatusMessage("Error parsing server response.", true);
+                            clearStatus();
+                            addStatusMessage("Error parsing server response. Please check the console.", true);
+                            progressBarContainer.style.display = 'none';
                             console.error("Parsing error:", e, "Response text:", xhr.responseText);
                         }
                     } else {
+                        // Handle non-200 server responses
+                        clearStatus();
                         let errorMsg = `Upload failed. Server responded with status: ${xhr.status}`;
                         try {
                             const errResponse = JSON.parse(xhr.responseText);
                             if (errResponse.error) {
                                 errorMsg = `Error: ${errResponse.error}`;
                             } else if (errResponse.detail) {
-                                 errorMsg = `Error: ${errResponse.detail}`;
+                                 errorMsg = `Error: ${errResponse.detail}`; // FastAPI validation errors
                             }
                         } catch(e) {
-                            // Use default errorMsg
+                            // xhr.responseText might not be JSON
+                            errorMsg = xhr.responseText || errorMsg;
                         }
                         addStatusMessage(errorMsg, true);
-                         console.error("Upload failed:", xhr.responseText);
+                        progressBarContainer.style.display = 'none';
+                        console.error("Upload failed:", xhr.responseText);
                     }
                 };
 
                 xhr.onerror = function() {
                     submitButton.disabled = false;
                     progressBarContainer.style.display = 'none';
-                    addStatusMessage("An error occurred during the upload. Please check your network connection.", true);
-                };
-
-                // Add message that processing has started after upload completes
-                xhr.upload.onloadend = function() {
-                    if (xhr.upload.onprogress) { // Ensure progress was for upload
-                        progressBar.style.width = '100%';
-                        progressBar.textContent = '100%';
-                    }
-                    addStatusMessage("Upload complete. Server is now processing the file...");
+                    clearStatus();
+                    addStatusMessage("An error occurred during the upload (e.g., network issue). Please check your connection.", true);
                 };
 
                 xhr.send(formData);
 
             } catch (error) {
+                // Catch synchronous errors in the setup of XHR, though less common
                 submitButton.disabled = false;
                 progressBarContainer.style.display = 'none';
-                addStatusMessage("An unexpected error occurred: " + error.message, true);
-                console.error("Form submission error:", error);
+                clearStatus();
+                addStatusMessage("An unexpected local error occurred: " + error.message, true);
+                console.error("Form submission setup error:", error);
             }
         });
 
@@ -157,7 +199,7 @@
             if (downloadFileId) {
                 window.location.href = `/download/${downloadFileId}`;
             } else {
-                addStatusMessage("No file ID available for download.", true);
+                addStatusMessage("No file ID available for download. Please process a file first.", true);
             }
         });
 
@@ -170,9 +212,10 @@
         }
 
         function clearStatus() {
+            // Clears only messages, not the "Ready to upload" or initial messages if needed.
+            // For this version, it clears everything.
             statusArea.innerHTML = '';
         }
-
     </script>
 </body>
 </html>
