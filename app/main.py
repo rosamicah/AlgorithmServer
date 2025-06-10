@@ -299,7 +299,7 @@ async def stream_processing(stream_id: str, filename: str, email: str): # email 
                 await asyncio.sleep(0.1)
 
                 # --- S3 Upload and Email Logic Start ---
-                s3_object_name = f"{os.path.splitext(filename)[0]}_processed_{stream_id[:8]}.xlsx" # Added part of stream_id for uniqueness
+                s3_object_name = f"SelfUploadedExcelBackups/{os.path.splitext(filename)[0]}_processed_{stream_id[:8]}.xlsx" # Added part of stream_id for uniqueness
                 s3_public_url = None
 
                 if s3_client and S3_BUCKET_NAME:
