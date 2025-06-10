@@ -320,6 +320,6 @@ def calculate_columns(df):
     # ---- FORMATTING for visible output ----
     df["% of ARV"] = df["% of ARV"].apply(lambda x: "" if pd.isna(x) else f"{int(round(x * 100))}%")
     df["Auto offer"] = df["Auto offer"].apply(lambda x: "" if pd.isna(x) else f"${int(x):,}")
-    yield "Saving File and Prepping for Download..."
+    yield "Final calculations complete. Preparing data for Excel conversion..."
 
     yield df

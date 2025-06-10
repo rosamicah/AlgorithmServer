@@ -40,7 +40,9 @@ The application provides an interactive web interface for uploading files direct
         *   "Step 2 of 4: Land Value Factor calculations processing..."
         *   "Step 3 of 4: Improvement Factor calculations processing..."
         *   "Step 4 of 4: ARV Factor calculations processing..."
-        *   And finally, "Saving File and Prepping for Download...".
+        *   "Final calculations complete. Preparing data for Excel conversion..."
+        *   "Data preparation complete. Starting Excel file generation..."
+        *   "Excel file generated. Finalizing for download..."
     *   Each of these messages will correspond to an update on the progress bar, providing a live view of the server's work.
 5.  After processing is complete, a "Download File" button will appear.
 6.  Click the "Download File" button. The browser will then download the processed Excel file, typically named `processed_<your_original_filename>.xlsx`.

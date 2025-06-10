@@ -217,10 +217,22 @@ async def stream_processing(stream_id: str, filename: str): # filename passed as
                     break
 
             if processed_df is not None:
+                yield {
+                    "event": "message",
+                    "data": json.dumps({"message": "Data preparation complete. Starting Excel file generation..."})
+                }
+                await asyncio.sleep(0.1)
+
                 output_buffer = BytesIO()
                 with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
                     processed_df.to_excel(writer, index=False, sheet_name='Processed Data')
                 output_buffer.seek(0)
+
+                yield {
+                    "event": "message",
+                    "data": json.dumps({"message": "Excel file generated. Finalizing for download..."})
+                }
+                await asyncio.sleep(0.1)
 
                 final_file_id = str(uuid.uuid4())
                 processed_files_cache[final_file_id] = {

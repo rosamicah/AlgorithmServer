@@ -110,13 +110,14 @@
 
                                 const eventSource = new EventSource(response.stream_url);
                                 let serverStepCount = 0;
-                                const totalExpectedMessages = 5; // 4 processing steps + 1 saving step
+                                const totalExpectedMessages = 7; // 4 processing steps + 1 data prep + 1 excel gen + 1 finalizing
 
                                 eventSource.onmessage = function(event) {
                                     const data = JSON.parse(event.data);
                                     addStatusMessage(data.message);
                                     serverStepCount++;
-                                    let progressPercentage = Math.min(Math.round((serverStepCount / totalExpectedMessages) * 100), 99); // Cap at 99 until 'complete'
+                                    // Cap at 99% until 'complete' event, which will set it to 100%
+                                    let progressPercentage = Math.min(Math.round((serverStepCount / totalExpectedMessages) * 100), 99);
                                     progressBar.style.width = progressPercentage + '%';
                                     progressBar.textContent = `Processing: ${progressPercentage}%`;
                                 };
