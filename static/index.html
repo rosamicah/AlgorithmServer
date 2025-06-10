@@ -110,7 +110,8 @@
 
                                 const eventSource = new EventSource(response.stream_url);
                                 let serverStepCount = 0;
-                                const totalExpectedMessages = 7; // 4 processing steps + 1 data prep + 1 excel gen + 1 finalizing
+                                // 3 intro messages + 4 main calc steps + 1 final calc + 1 data prep + 1 excel gen = 10 messages before 'complete'
+                                const totalExpectedMessages = 10;
 
                                 eventSource.onmessage = function(event) {
                                     const data = JSON.parse(event.data);

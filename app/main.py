@@ -190,6 +190,12 @@ async def stream_processing(stream_id: str, filename: str): # filename passed as
                 }
                 return
 
+            yield {
+                "event": "message",
+                "data": json.dumps({"message": "Stream connected. Preparing to read data file..."})
+            }
+            await asyncio.sleep(0.1)
+
             # Determine file type and read into DataFrame
             if filename.endswith(".csv"):
                 df = pd.read_csv(temp_file_path)
@@ -202,7 +208,19 @@ async def stream_processing(stream_id: str, filename: str): # filename passed as
                 }
                 return
 
+            yield {
+                "event": "message",
+                "data": json.dumps({"message": "Data file successfully read. Standardizing columns..."})
+            }
+            await asyncio.sleep(0.1)
+
             df_enforced = enforce_master_columns(df.copy())
+
+            yield {
+                "event": "message",
+                "data": json.dumps({"message": "Columns standardized. Starting main calculations..."})
+            }
+            await asyncio.sleep(0.1)
 
             processed_df = None
             for item in calculate_columns(df_enforced):

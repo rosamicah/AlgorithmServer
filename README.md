@@ -34,8 +34,11 @@ The application provides an interactive web interface for uploading files direct
 4.  Click the "Upload and Process" button.
     *   An upload progress bar will show the file being sent to the server.
     *   Once the file is uploaded (upload progress will also be shown), a message like "File uploaded. Connecting to processing stream..." will appear.
-    *   The application then uses Server-Sent Events (SSE) to provide real-time updates from the server as it processes the file.
-    *   The progress bar will fill, and the status area will display messages for major calculation blocks *as they occur on the server*:
+    *   The application then uses Server-Sent Events (SSE) to provide real-time updates from the server as it starts reading and processing the file.
+    *   The progress bar will fill, and the status area will display messages for each stage of processing *as they occur on the server*. These stages include:
+        *   "Stream connected. Preparing to read data file..."
+        *   "Data file successfully read. Standardizing columns..."
+        *   "Columns standardized. Starting main calculations..."
         *   "Step 1 of 4: Auto Offer calculations processing..."
         *   "Step 2 of 4: Land Value Factor calculations processing..."
         *   "Step 3 of 4: Improvement Factor calculations processing..."
