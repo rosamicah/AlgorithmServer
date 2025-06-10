@@ -26,7 +26,7 @@ This application is designed to be deployed on Render.com as a web service using
 
 ### AWS S3 Bucket Configuration for Public Access
 
-For the S3 links to processed files to be publicly accessible, your S3 bucket (specified by the `S3_BUCKET_NAME` environment variable) needs to be configured correctly. Files are stored under the `SelfUploadedExcelBackups/` prefix within this bucket. This application uploads files *without* setting an explicit Access Control List (ACL) like `public-read` at the object level (as this is often restricted by default S3 settings for new buckets). Therefore, public readability relies on your bucket's configuration:
+For the S3 links to processed files to be publicly accessible, your S3 bucket (specified by the `S3_BUCKET_NAME` environment variable) needs to be configured correctly. Files are stored under the `SelfUploadedExcelBackups/` prefix within this bucket. Additionally, spaces in the original uploaded filenames are replaced with underscores (`_`) in the S3 object key to ensure URL compatibility. This application uploads files *without* setting an explicit Access Control List (ACL) like `public-read` at the object level (as this is often restricted by default S3 settings for new buckets). Therefore, public readability relies on your bucket's configuration:
 
 1.  **Bucket Policy:** Ensure your S3 bucket has a bucket policy that allows public `s3:GetObject` access for the paths where files will be stored (e.g., `arn:aws:s3:::your-bucket-name/*`). An example policy statement is:
     ```json
