@@ -8,3 +8,4 @@ aiofiles
 sse-starlette
 boto3
 emails
+XlsxWriter

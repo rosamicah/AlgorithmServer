@@ -288,7 +288,7 @@ async def stream_processing(stream_id: str, filename: str, email: str): # email 
                 await asyncio.sleep(0.1)
 
                 output_buffer = BytesIO()
-                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
                     processed_df.to_excel(writer, index=False, sheet_name='Processed Data')
                 output_buffer.seek(0)
 
