@@ -56,6 +56,7 @@
         const progressBar = document.getElementById('progressBar');
         const downloadButton = document.getElementById('downloadButton');
         let downloadFileId = null;
+        // let originalUploadedFilename = null; // Potentially store for download naming if needed by UI
 
         uploadForm.addEventListener('submit', async function(event) {
             event.preventDefault();
@@ -77,7 +78,7 @@
 
             try {
                 const xhr = new XMLHttpRequest();
-                xhr.open('POST', '/process/', true);
+                xhr.open('POST', '/upload_for_sse/', true); // Changed to new SSE upload endpoint
 
                 xhr.upload.onprogress = function(e) {
                     if (e.lengthComputable) {
@@ -88,109 +89,107 @@
                 };
 
                 xhr.upload.onloadend = function() {
-                    // This signifies the end of the upload itself.
-                    // Keep progress bar at 100% for upload, or change text.
                     progressBar.style.width = '100%';
                     progressBar.textContent = 'Upload Complete. Waiting...';
-                    // Clear previous "Uploading file..." and add new status
                     clearStatus();
                     addStatusMessage("Upload complete. Waiting for server to start processing...");
                 };
 
                 xhr.onload = async function() {
-                    // This is called when the server has responded after its processing.
-                    submitButton.disabled = false; // Re-enable button by default
-
                     if (xhr.status === 200) {
                         try {
                             const response = JSON.parse(xhr.responseText);
+                            if (response.stream_url && response.stream_id) {
+                                // originalUploadedFilename = response.original_filename; // Store if needed
+                                clearStatus();
+                                addStatusMessage("File uploaded. Connecting to processing stream...");
 
-                            if (response.status_messages && response.status_messages.length > 0 && response.file_id) {
-                                clearStatus(); // Clear "Waiting for server..."
-                                addStatusMessage("Server processing started...");
-
-                                progressBar.style.width = '0%'; // Reset for server processing simulation
+                                progressBar.style.width = '0%';
                                 progressBar.textContent = 'Processing: 0%';
-                                progressBarContainer.style.display = 'block'; // Ensure it's visible
+                                progressBarContainer.style.display = 'block'; // Ensure it's visible for SSE progress
 
-                                const totalServerSteps = response.status_messages.length;
-                                let currentServerStep = 0;
+                                const eventSource = new EventSource(response.stream_url);
+                                let serverStepCount = 0;
+                                const totalExpectedMessages = 5; // 4 processing steps + 1 saving step
 
-                                function displayNextServerStep() {
-                                    if (currentServerStep < totalServerSteps) {
-                                        const message = response.status_messages[currentServerStep];
-                                        addStatusMessage(message);
+                                eventSource.onmessage = function(event) {
+                                    const data = JSON.parse(event.data);
+                                    addStatusMessage(data.message);
+                                    serverStepCount++;
+                                    let progressPercentage = Math.min(Math.round((serverStepCount / totalExpectedMessages) * 100), 99); // Cap at 99 until 'complete'
+                                    progressBar.style.width = progressPercentage + '%';
+                                    progressBar.textContent = `Processing: ${progressPercentage}%`;
+                                };
 
-                                        const progressPercentage = Math.round(((currentServerStep + 1) / totalServerSteps) * 100);
-                                        progressBar.style.width = progressPercentage + '%';
-                                        progressBar.textContent = `Processing: ${progressPercentage}%`;
+                                eventSource.addEventListener('complete', function(event) {
+                                    const data = JSON.parse(event.data);
+                                    addStatusMessage(data.message, false, true);
+                                    progressBar.style.width = '100%';
+                                    progressBar.textContent = 'Processing Complete!';
 
-                                        currentServerStep++;
-                                        setTimeout(displayNextServerStep, 700); // 700ms delay
-                                    } else {
-                                        // All steps displayed
-                                        progressBar.textContent = 'Processing Complete!';
-                                        // Consider hiding progress bar after a short delay or changing its color
-                                        // setTimeout(() => { progressBarContainer.style.display = 'none'; }, 2000);
+                                    downloadFileId = data.file_id;
+                                    downloadButton.style.display = 'block';
 
-                                        downloadFileId = response.file_id;
-                                        downloadButton.style.display = 'block';
-                                        addStatusMessage("Click the button below to download your file.", false, true);
-                                    }
-                                }
-                                displayNextServerStep(); // Start displaying simulated server steps
+                                    eventSource.close();
+                                    submitButton.disabled = false;
+                                });
 
-                            } else if (response.error) {
+                                eventSource.onerror = function(err) {
+                                    addStatusMessage("Error with processing stream. Connection closed.", true);
+                                    console.error("EventSource failed:", err);
+                                    eventSource.close();
+                                    submitButton.disabled = false;
+                                    progressBarContainer.style.display = 'none';
+                                };
+
+                            } else if (response.error) { // Error from /upload_for_sse/ itself
                                 clearStatus();
-                                addStatusMessage(`Error: ${response.error}`, true);
+                                addStatusMessage(`Upload error: ${response.error}`, true);
+                                submitButton.disabled = false;
                                 progressBarContainer.style.display = 'none';
-                            } else {
+                            } else { // Unexpected success response from /upload_for_sse/
                                 clearStatus();
-                                addStatusMessage("Processing complete, but an issue occurred retrieving results.", true);
+                                addStatusMessage("Upload succeeded but no stream URL received.", true);
+                                submitButton.disabled = false;
                                 progressBarContainer.style.display = 'none';
                             }
                         } catch (e) {
                             clearStatus();
-                            addStatusMessage("Error parsing server response. Please check the console.", true);
+                            addStatusMessage("Error parsing server response from upload. Please check console.", true);
+                            submitButton.disabled = false;
                             progressBarContainer.style.display = 'none';
-                            console.error("Parsing error:", e, "Response text:", xhr.responseText);
+                            console.error("Parsing error from /upload_for_sse/:", e, "Response text:", xhr.responseText);
                         }
                     } else {
-                        // Handle non-200 server responses
+                        // Handle non-200 server responses from /upload_for_sse/
                         clearStatus();
-                        let errorMsg = `Upload failed. Server responded with status: ${xhr.status}`;
+                        let errorMsg = `Upload initialization failed. Server responded with status: ${xhr.status}`;
                         try {
                             const errResponse = JSON.parse(xhr.responseText);
-                            if (errResponse.error) {
-                                errorMsg = `Error: ${errResponse.error}`;
-                            } else if (errResponse.detail) {
-                                 errorMsg = `Error: ${errResponse.detail}`; // FastAPI validation errors
-                            }
-                        } catch(e) {
-                            // xhr.responseText might not be JSON
-                            errorMsg = xhr.responseText || errorMsg;
-                        }
+                            if (errResponse.error) errorMsg = `Error: ${errResponse.error}`;
+                            else if (errResponse.detail) errorMsg = `Error: ${errResponse.detail}`;
+                        } catch(e) { errorMsg = xhr.responseText || errorMsg; }
                         addStatusMessage(errorMsg, true);
+                        submitButton.disabled = false;
                         progressBarContainer.style.display = 'none';
-                        console.error("Upload failed:", xhr.responseText);
+                        console.error("Upload init failed:", xhr.responseText);
                     }
                 };
 
-                xhr.onerror = function() {
+                xhr.onerror = function() { // Network error for the initial POST
                     submitButton.disabled = false;
                     progressBarContainer.style.display = 'none';
                     clearStatus();
-                    addStatusMessage("An error occurred during the upload (e.g., network issue). Please check your connection.", true);
+                    addStatusMessage("An error occurred during the initial upload request (e.g., network issue).", true);
                 };
 
                 xhr.send(formData);
 
-            } catch (error) {
-                // Catch synchronous errors in the setup of XHR, though less common
+            } catch (error) { // Synchronous errors in setting up XHR
                 submitButton.disabled = false;
                 progressBarContainer.style.display = 'none';
                 clearStatus();
-                addStatusMessage("An unexpected local error occurred: " + error.message, true);
+                addStatusMessage("An unexpected local error occurred before upload: " + error.message, true);
                 console.error("Form submission setup error:", error);
             }
         });

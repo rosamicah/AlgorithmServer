@@ -2,11 +2,16 @@ import pandas as pd
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sse_starlette.sse import EventSourceResponse
 from io import BytesIO
 import uvicorn
 import os
 import uuid
 from pathlib import Path
+import asyncio
+import tempfile
+import shutil
+import json
 
 from .processor import enforce_master_columns, calculate_columns
 
@@ -14,6 +19,13 @@ app = FastAPI()
 
 # In-memory cache for processed files
 processed_files_cache = {}
+
+# Temporary file storage directory
+TEMP_FILE_DIR = tempfile.gettempdir()
+# Optional: Create a specific subfolder if desired, e.g.,
+# TEMP_FILE_DIR = os.path.join(tempfile.gettempdir(), "app_temp_files")
+# if not os.path.exists(TEMP_FILE_DIR):
+#     os.makedirs(TEMP_FILE_DIR)
 
 # Mount static files directory
 # Ensure the 'static' directory exists at the root of where main.py is run from,
@@ -134,27 +146,136 @@ async def process_file(file: UploadFile = File(...)):
             content={"error": f"An unexpected error occurred during processing: {str(e)}", "status_messages": status_messages}
         )
 
+@app.post("/upload_for_sse/")
+async def upload_for_sse_processing(file: UploadFile = File(...)):
+    try:
+        file_id = str(uuid.uuid4()) # This ID is for the temporary file
+        # Save the uploaded file to a temporary location
+        temp_file_path = os.path.join(TEMP_FILE_DIR, f"{file_id}_{file.filename}")
+
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # It's important to close the uploaded file explicitly
+        # If file.file is an SpooledTemporaryFile, close() might not be async
+        # For UploadFile, file.close() is available but might not be async.
+        # The `with open(...)` context manager handles closing the buffer it writes to.
+        # The original file object from UploadFile should be managed by FastAPI or Starlette.
+        # However, explicitly calling close if available is good practice if not using `async with`.
+        if hasattr(file, "close") and callable(file.close):
+             file.close()
+
+
+        return JSONResponse({
+            "message": "File uploaded successfully. Starting processing stream.",
+            "stream_id": file_id,
+            "original_filename": file.filename,
+            "stream_url": f"/stream_processing/{file_id}/?filename={file.filename}"
+        })
+    except Exception as e:
+        # Log the exception e
+        print(f"Error during /upload_for_sse/: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+
+@app.get("/stream_processing/{stream_id}/")
+async def stream_processing(stream_id: str, filename: str): # filename passed as query param
+    temp_file_path = os.path.join(TEMP_FILE_DIR, f"{stream_id}_{filename}")
+
+    async def event_generator():
+        try:
+            if not os.path.exists(temp_file_path):
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"message": "Error: Processing file not found. It might have expired or an upload error occurred."})
+                }
+                return
+
+            # Determine file type and read into DataFrame
+            if filename.endswith(".csv"):
+                df = pd.read_csv(temp_file_path)
+            elif filename.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(temp_file_path)
+            else:
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"message": "Invalid file type for processing."})
+                }
+                return
+
+            df_enforced = enforce_master_columns(df.copy())
+
+            processed_df = None
+            for item in calculate_columns(df_enforced):
+                if isinstance(item, str): # It's a status message
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({"message": item})
+                    }
+                    await asyncio.sleep(0.1)
+                elif isinstance(item, pd.DataFrame):
+                    processed_df = item
+                    break
+
+            if processed_df is not None:
+                output_buffer = BytesIO()
+                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                    processed_df.to_excel(writer, index=False, sheet_name='Processed Data')
+                output_buffer.seek(0)
+
+                final_file_id = str(uuid.uuid4())
+                processed_files_cache[final_file_id] = {
+                    "data": output_buffer,
+                    "filename": f"processed_{filename}"
+                }
+
+                yield {
+                    "event": "complete",
+                    "data": json.dumps({
+                        "file_id": final_file_id,
+                        "message": "Processing complete. File is ready for download."
+                    })
+                }
+            else:
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"message": "Processing failed to return a DataFrame."})
+                }
+
+        except Exception as e:
+            print(f"Error during /stream_processing/: {str(e)}")
+            yield {
+                "event": "error",
+                "data": json.dumps({"message": f"Error during processing: {str(e)}"})
+            }
+        finally:
+            if os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except Exception as e_remove:
+                    print(f"Error removing temp file {temp_file_path}: {str(e_remove)}")
+
+
+    return EventSourceResponse(event_generator())
+
 @app.get("/download/{file_id}")
 async def download_file(file_id: str):
     """
     Serves the processed file from the cache using its file_id.
     The file is removed from the cache after retrieval.
     """
-    cached_file_data = processed_files_cache.pop(file_id, None)
+    cached_file_info = processed_files_cache.pop(file_id, None)
 
-    if cached_file_data is None:
+    if not cached_file_info:
         raise HTTPException(status_code=404, detail="File not found, may have expired or already been downloaded.")
 
-    output_buffer = cached_file_data["buffer"]
-    original_filename = cached_file_data["filename"]
-
-    # Ensure buffer is at the beginning before reading
+    output_buffer = cached_file_info["data"]
+    response_filename = cached_file_info["filename"]
     output_buffer.seek(0)
 
     return StreamingResponse(
         output_buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename=processed_{original_filename}"}
+        headers={"Content-Disposition": f"attachment; filename={response_filename}"}
     )
 
 if __name__ == "__main__":

@@ -33,13 +33,15 @@ The application provides an interactive web interface for uploading files direct
 3.  Click the "Choose file" button and select an Excel (.xls, .xlsx) or CSV (.csv) file from your computer.
 4.  Click the "Upload and Process" button.
     *   An upload progress bar will show the file being sent to the server.
-    *   Once uploaded, a status area will display a message like "Upload complete. Server is now processing the file...".
-    *   The progress bar will then reset and fill up in stages to visualize the server-side processing. Simultaneously, the status area will show progress updates for major calculation blocks:
-        *   "Step 1 of 4: Auto Offer calculations processing..." (Progress bar updates)
-        *   "Step 2 of 4: Land Value Factor calculations processing..." (Progress bar updates)
-        *   "Step 3 of 4: Improvement Factor calculations processing..." (Progress bar updates)
-        *   "Step 4 of 4: ARV Factor calculations processing..." (Progress bar updates)
-        *   And finally, "Saving File and Prepping for Download..." (Progress bar reaches 100%).
+    *   Once the file is uploaded (upload progress will also be shown), a message like "File uploaded. Connecting to processing stream..." will appear.
+    *   The application then uses Server-Sent Events (SSE) to provide real-time updates from the server as it processes the file.
+    *   The progress bar will fill, and the status area will display messages for major calculation blocks *as they occur on the server*:
+        *   "Step 1 of 4: Auto Offer calculations processing..."
+        *   "Step 2 of 4: Land Value Factor calculations processing..."
+        *   "Step 3 of 4: Improvement Factor calculations processing..."
+        *   "Step 4 of 4: ARV Factor calculations processing..."
+        *   And finally, "Saving File and Prepping for Download...".
+    *   Each of these messages will correspond to an update on the progress bar, providing a live view of the server's work.
 5.  After processing is complete, a "Download File" button will appear.
 6.  Click the "Download File" button. The browser will then download the processed Excel file, typically named `processed_<your_original_filename>.xlsx`.
 
