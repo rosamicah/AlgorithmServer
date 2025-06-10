@@ -24,6 +24,34 @@ This application is designed to be deployed on Render.com as a web service using
     *   Click "Create Web Service". Render will build the Docker image and deploy your application.
     *   Once deployed, Render will provide you with a URL for your service (e.g., `https://your-app-name.onrender.com`).
 
+### AWS S3 Bucket Configuration for Public Access
+
+For the S3 links to processed files to be publicly accessible, your S3 bucket (specified by the `S3_BUCKET_NAME` environment variable) needs to be configured correctly. This application uploads files *without* setting an explicit Access Control List (ACL) like `public-read` at the object level (as this is often restricted by default S3 settings for new buckets). Therefore, public readability relies on your bucket's configuration:
+
+1.  **Bucket Policy:** Ensure your S3 bucket has a bucket policy that allows public `s3:GetObject` access for the paths where files will be stored (e.g., `arn:aws:s3:::your-bucket-name/*`). An example policy statement is:
+    ```json
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "PublicReadGetObject",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::your-bucket-name/*"
+            }
+        ]
+    }
+    ```
+    Replace `your-bucket-name` with your actual bucket name.
+
+2.  **Block Public Access Settings:** The "Block Public Access" settings for your S3 bucket (found in the S3 console under the bucket's "Permissions" tab) must be configured to allow the public access granted by your bucket policy. If you intend for objects to be public via the bucket policy, ensure that settings such as:
+    *   "Block public access to buckets and objects granted through new public bucket policies"
+    *   "Block public access to buckets and objects granted through any public bucket policies"
+    are **disabled (unchecked)**. Other "Block Public Access" settings might also need review depending on your specific security posture, but these two are key for bucket policies granting public read access.
+
+If these settings are not correctly configured, the S3 upload by the application might still succeed (without an ACL error), but the S3 URLs provided will likely result in "Access Denied" errors when visited.
+
 ## Web Interface
 
 The application provides an interactive web interface for uploading files directly through your browser.

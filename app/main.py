@@ -314,7 +314,6 @@ async def stream_processing(stream_id: str, filename: str, email: str): # email 
                             Bucket=S3_BUCKET_NAME,
                             Key=s3_object_name,
                             Body=output_buffer,
-                            ACL='public-read',
                             ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                         )
                         output_buffer.seek(0)
